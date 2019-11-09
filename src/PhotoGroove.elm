@@ -1,6 +1,5 @@
 module PhotoGroove exposing (main)
 
-import Array exposing (Array)
 import Browser
 import Html exposing (Html, button, div, h1, h3, img, text, label, input)
 import Html.Attributes exposing (..)
@@ -13,23 +12,22 @@ type Msg
     = ClickedPhoto String
     | ClickedSize ThumbnailSize
     | ClickedSurpriseMe
-    | GotSelectedIndex Int
+    | GotRandomPhoto Photo
         
 type ThumbnailSize = Small | Medium | Large
-    
 
-type alias Model = { photos: List Photo
-                   , selectedUrl: String
+type Status
+    = Loading
+    | Loaded (List Photo) String
+    | Errored String
+
+type alias Model = { status: Status
                    , chosenSize : ThumbnailSize     
                    }
 
 initialModel : Model
 initialModel =
-    { photos = [ { url = "1.jpeg" }
-               , { url = "2.jpeg" }
-               , { url = "3.jpeg" }
-               ]
-    , selectedUrl = "1.jpeg"
+    { status = Loading
     , chosenSize = Medium
     }
 
@@ -61,18 +59,9 @@ sizeToString size =
             "med"
         Large ->
             "large"
-                
-getPhotoUrl : Int -> Array Photo -> String
-getPhotoUrl index photoArray =
-    case Array.get index photoArray of
-        Just photo ->
-            photo.url
-        Nothing ->
-            ""
 
-view : Model -> Html Msg
-view model =
-    div [ class "content" ]
+viewLoaded : List Photo -> String -> ThumbnailSize -> List (Html Msg)
+viewLoaded photos selectedUrl chosenSize =
         [ h1 [] [ text "Photo Groove" ]
         , button
               [ onClick ClickedSurpriseMe ]
@@ -80,28 +69,59 @@ view model =
         , h3 [] [ text "Thumbnail Size:" ]
         , div [ id "choose-size" ]
             (List.map viewSizeChooser [ Small, Medium, Large ])
-        , div [ id "thumbnails", class (sizeToString model.chosenSize) ]
-            (List.map (viewThumbnail model.selectedUrl) model.photos)
+        , div [ id "thumbnails", class (sizeToString chosenSize) ]
+            (List.map (viewThumbnail selectedUrl) photos)
         , img
               [ class "large"
-              , src (urlPrefix ++ "large/" ++ model.selectedUrl)
+              , src (urlPrefix ++ "large/" ++ selectedUrl)
               ]
               []
         ]
 
+view : Model -> Html Msg
+view model =
+    div [ class "content" ] <|
+        case model.status of
+             Loaded photos selectedUrl ->
+                 viewLoaded photos selectedUrl model.chosenSize
+             Loading ->
+                 [ text "loading" ]
+             Errored errorMessage ->
+                 [ text ("Error: " ++ errorMessage) ]
+                     
+selectUrl : String -> Status -> Status
+selectUrl url status =
+    case status of
+        Loaded photos _ ->
+            Loaded photos url
+        Loading ->
+            status
+        Errored errorMessage ->
+            status
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    let photoArray = Array.fromList model.photos in
     case msg of
         ClickedPhoto url ->
-            ({ model | selectedUrl = url }, Cmd.none )
+            ({ model | status = selectUrl url model.status }, Cmd.none )
         ClickedSize size ->
             ({ model | chosenSize = size }, Cmd.none )
         ClickedSurpriseMe ->
-            ( model, Random.generate GotSelectedIndex (Random.int 0 (Array.length photoArray - 1)) )
-        GotSelectedIndex i ->
-            ({ model | selectedUrl = getPhotoUrl i photoArray }, Cmd.none )
-        
+            case model.status of
+                Loaded (firstPhoto :: otherPhotos) _ ->
+                    Random.uniform firstPhoto otherPhotos
+                        |> Random.generate GotRandomPhoto
+                        |> Tuple.pair model
+                Loaded [] _ ->
+                    ( model, Cmd.none )
+                Loading ->
+                    ( model, Cmd.none )
+                Errored errorMessage ->
+                    ( model, Cmd.none )
+            
+        GotRandomPhoto photo ->
+            ({ model | status = selectUrl photo.url model.status }, Cmd.none )
+
 main : Program () Model Msg
 main =
     Browser.element
